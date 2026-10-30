@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stok Bahan Ajar — SITTA Vue</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">SITTA</a>
+    <nav aria-label="Navigasi utama">
+      <a href="index.html">Beranda</a>
+      <a href="stok.html" aria-current="page">Stok Bahan Ajar</a>
+      <a href="tracking.html">Tracking DO</a>
+    </nav>
+  </header>
+
+  <div id="app" v-cloak>
+    <main class="container">
+      <div class="page-head">
+        <h1>Stok Bahan Ajar</h1>
+        <p>Menampilkan <strong v-text="stokTampil.length"></strong> dari {{ daftar.length }} data stok seluruh UT-Daerah.</p>
+      </div>
+
+      <!-- v-show: banner re-order hanya disembunyikan/ditampilkan -->
+      <div class="alert" v-show="jumlahReorder > 0" role="alert">
+        &#9888; {{ jumlahReorder }} bahan ajar perlu di-<em>re-order</em> (stok kosong atau di bawah safety stock).
+      </div>
+      <div class="toast" v-if="pesan" role="status">{{ pesan }}</div>
+
+      <!-- ============ FILTER & SORT ============ -->
+      <section class="panel" aria-labelledby="judul-filter">
+        <h2 id="judul-filter">Filter dan urutkan</h2>
+        <div class="filter-grid">
+          <div class="field">
+            <label for="f-upbjj">UT-Daerah</label>
+            <select id="f-upbjj" v-model="filters.upbjj">
+              <option value="">Semua UT-Daerah</option>
+              <option v-for="u in upbjjList" :key="u" :value="u">{{ u }}</option>
+            </select>
+          </div>
+
+          <!-- dependent options: filter kategori baru muncul setelah UT-Daerah dipilih -->
+          <div class="field" v-if="filters.upbjj">
+            <label for="f-kategori">Kategori Mata Kuliah</label>
+            <select id="f-kategori" v-model="filters.kategori">
+              <option value="">Semua kategori di {{ filters.upbjj }}</option>
+              <option v-for="k in kategoriTersedia" :key="k" :value="k">{{ k }}</option>
+            </select>
+          </div>
+          <div class="field" v-else>
+            <label>Kategori Mata Kuliah</label>
+            <p class="hint-kecil">Pilih UT-Daerah terlebih dahulu untuk menampilkan filter kategori.</p>
+          </div>
+
+          <div class="field">
+            <label for="f-cari">Cari kode / judul</label>
+            <input id="f-cari" type="search" v-model.trim="filters.keyword" placeholder="mis. ASIP4301">
+          </div>
+
+          <div class="field">
+            <label for="f-urut">Urutkan berdasarkan</label>
+            <div class="inline">
+              <select id="f-urut" v-model="urutan.by">
+                <option value="judul">Judul</option>
+                <option value="qty">Stok (qty)</option>
+                <option value="harga">Harga</option>
+              </select>
+              <select v-model="urutan.arah" aria-label="Arah pengurutan">
+                <option value="asc">Naik (A–Z / kecil–besar)</option>
+                <option value="desc">Turun (Z–A / besar–kecil)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="filter-aksi">
+          <label class="cek">
+            <input type="checkbox" v-model="filters.reorderOnly">
+            Hanya tampilkan yang perlu re-order
+          </label>
+          <button type="button" class="btn btn-secondary" @click="resetFilter" :disabled="!adaFilter">Reset filter</button>
+        </div>
+      </section>
+
+      <!-- ============ RINGKASAN ============ -->
+      <section class="ringkasan" aria-label="Ringkasan status stok pada hasil filter">
+        <div class="kartu aman"><strong v-text="ringkasan.aman"></strong><span>Aman</span></div>
+        <div class="kartu menipis"><strong v-text="ringkasan.menipis"></strong><span>Menipis</span></div>
+        <div class="kartu kosong"><strong v-text="ringkasan.kosong"></strong><span>Kosong</span></div>
+      </section>
+
+      <!-- ============ TABEL ============ -->
+      <section class="panel" aria-label="Daftar stok bahan ajar">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Kode / Mata Kuliah</th>
+                <th scope="col">Kategori</th>
+                <th scope="col">UT-Daerah</th>
+                <th scope="col">Lokasi Rak</th>
+                <th scope="col" class="num">Harga</th>
+                <th scope="col" class="num">Qty</th>
+                <th scope="col" class="num">Safety</th>
+                <th scope="col">Status</th>
+                <th scope="col">Catatan</th>
+                <th scope="col">Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in stokTampil" :key="item.kode + '-' + item.upbjj" :class="{ 'baris-kosong': item.qty === 0 }">
+                <td class="wrap"><strong v-text="item.kode"></strong><br>{{ item.judul }}</td>
+                <td>{{ item.kategori }}</td>
+                <td>{{ item.upbjj }}</td>
+                <td>{{ item.lokasiRak }}</td>
+                <td class="num">{{ formatRupiah(item.harga) }}</td>
+                <td class="num">{{ item.qty }}</td>
+                <td class="num">{{ item.safety }}</td>
+                <td>
+                  <span v-if="item.qty === 0" class="status kosong">&#10006; Kosong</span>
+                  <span v-else-if="item.qty < item.safety" class="status menipis">&#9888; Menipis</span>
+                  <span v-else class="status aman">&#10004; Aman</span>
+                </td>
+                <td class="wrap" v-html="item.catatanHTML"></td>
+                <td><button type="button" class="btn-link" @click="mulaiEdit(item)">Edit</button></td>
+              </tr>
+              <tr v-if="stokTampil.length === 0">
+                <td colspan="10" class="empty">Tidak ada data yang cocok dengan filter.</td>
+              </tr>
+            </tbody>
+          </table>   
+        </div>
+      </section>
+
+      <!-- ============ TAMBAH DATA ============ -->
+      <section class="panel" aria-labelledby="judul-tambah">
+        <div class="panel-head">
+          <h2 id="judul-tambah">Tambah bahan ajar baru</h2>
+          <button type="button" class="btn btn-secondary" @click="tampilForm = !tampilForm">
+            {{ tampilForm ? "Tutup formulir" : "Buka formulir" }}
+          </button>
+        </div>
+
+        <form v-if="tampilForm" @submit.prevent="tambahBaru" novalidate>
+          <div class="form-grid">
+            <div class="field">
+              <label for="n-kode">Kode mata kuliah</label>
+              <input id="n-kode" type="text" v-model.trim="form.kode" placeholder="ASIP4301" :class="{ salah: errors.kode }">
+              <small class="err" v-if="errors.kode">{{ errors.kode }}</small>
+            </div>
+            <div class="field">
+              <label for="n-judul">Judul</label>
+              <input id="n-judul" type="text" v-model.trim="form.judul" :class="{ salah: errors.judul }">
+              <small class="err" v-if="errors.judul">{{ errors.judul }}</small>
+            </div>
+            <div class="field">
+              <label for="n-kategori">Kategori</label>
+              <select id="n-kategori" v-model="form.kategori" :class="{ salah: errors.kategori }">
+                <option value="" disabled>— pilih kategori —</option>
+                <option v-for="k in kategoriList" :key="k" :value="k">{{ k }}</option>
+              </select>
+              <small class="err" v-if="errors.kategori">{{ errors.kategori }}</small>
+            </div>
+            <div class="field">
+              <label for="n-upbjj">UT-Daerah</label>
+              <select id="n-upbjj" v-model="form.upbjj" :class="{ salah: errors.upbjj }">
+                <option value="" disabled>— pilih UT-Daerah —</option>
+                <option v-for="u in upbjjList" :key="u" :value="u">{{ u }}</option>
+              </select>
+              <small class="err" v-if="errors.upbjj">{{ errors.upbjj }}</small>
+            </div>
+            <div class="field">
+              <label for="n-rak">Lokasi rak</label>
+              <input id="n-rak" type="text" v-model.trim="form.lokasiRak" placeholder="R1-A1" :class="{ salah: errors.lokasiRak }">
+              <small class="err" v-if="errors.lokasiRak">{{ errors.lokasiRak }}</small>
+            </div>
+            <div class="field">
+              <label for="n-harga">Harga (Rp)</label>
+              <input id="n-harga" type="number" min="0" v-model.number="form.harga" :class="{ salah: errors.harga }">
+              <small class="err" v-if="errors.harga">{{ errors.harga }}</small>
+            </div>
+            <div class="field">
+              <label for="n-qty">Jumlah stok (qty)</label>
+              <input id="n-qty" type="number" min="0" v-model.number="form.qty" :class="{ salah: errors.qty }">
+              <small class="err" v-if="errors.qty">{{ errors.qty }}</small>
+            </div>
+            <div class="field">
+              <label for="n-safety">Safety stock</label>
+              <input id="n-safety" type="number" min="0" v-model.number="form.safety" :class="{ salah: errors.safety }">
+              <small class="err" v-if="errors.safety">{{ errors.safety }}</small>
+            </div>
+            <div class="field lebar">
+              <label for="n-catatan">Catatan (teks biasa)</label>
+              <input id="n-catatan" type="text" v-model="form.catatan" maxlength="120">
+            </div>
+          </div>
+          <p class="petunjuk" v-show="petunjukStok">{{ petunjukStok }}</p>
+          <div class="form-aksi">
+            <button type="submit" class="btn btn-primary">Simpan data</button>
+            <button type="button" class="btn btn-secondary" @click="kosongkanForm">Kosongkan</button>
+          </div>
+        </form>
+        <p v-else class="hint-kecil">Klik “Buka formulir” untuk menambahkan data bahan ajar baru.</p>
+      </section>
+
+      <p class="catatan-kaki">
+        Data tambahan dan hasil edit tersimpan di peramban.
+        <button type="button" class="btn-link" @click="kembalikanDataAwal">Kembalikan data awal</button>
+      </p>
+    </main>
+
+    <!-- ============ MODAL EDIT ============ -->
+    <div class="modal-backdrop" v-if="editing" @click.self="batalEdit">
+      <form class="modal" role="dialog" aria-modal="true" aria-labelledby="judul-edit" @submit.prevent="simpanEdit" novalidate>
+        <h2 id="judul-edit">Edit stok</h2>
+        <p class="hint-kecil"><strong>{{ editing.kode }}</strong> — {{ editing.judul }} ({{ editing.upbjj }})</p>
+
+        <div class="field">
+          <label for="e-rak">Lokasi rak</label>
+          <input id="e-rak" type="text" v-model.trim="editing.lokasiRak" :class="{ salah: editErrors.lokasiRak }">
+          <small class="err" v-if="editErrors.lokasiRak">{{ editErrors.lokasiRak }}</small>
+        </div>
+        <div class="dua-kolom">
+          <div class="field">
+            <label for="e-qty">Qty</label>
+            <input id="e-qty" type="number" min="0" v-model.number="editing.qty" :class="{ salah: editErrors.qty }">
+            <small class="err" v-if="editErrors.qty">{{ editErrors.qty }}</small>
+          </div>
+          <div class="field">
+            <label for="e-safety">Safety</label>
+            <input id="e-safety" type="number" min="0" v-model.number="editing.safety" :class="{ salah: editErrors.safety }">
+            <small class="err" v-if="editErrors.safety">{{ editErrors.safety }}</small>
+          </div>
+        </div>
+        <div class="field">
+          <label for="e-harga">Harga (Rp)</label>
+          <input id="e-harga" type="number" min="0" v-model.number="editing.harga" :class="{ salah: editErrors.harga }">
+          <small class="err" v-if="editErrors.harga">{{ editErrors.harga }}</small>
+        </div>
+        <div class="field">
+          <label for="e-catatan">Catatan (teks biasa)</label>
+          <input id="e-catatan" type="text" v-model="editing.catatan" maxlength="120">
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-link" @click="batalEdit">Batal</button>
+          <button type="submit" class="btn btn-primary">Simpan perubahan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <footer>SITTA — Tugas Praktik 2 · Vue.js</footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.js"></script>
+  <script src="js/dataBahanAjar.js"></script>
+  <script src="js/stok-app.js"></script>
+</body>
+</html>
